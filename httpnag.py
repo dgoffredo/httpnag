@@ -22,23 +22,37 @@ log = Log()
 
 class Sql:
     INSERT_AN_ERROR = """
-insert into Errors(StartingWhenEpochSeconds,  DurationSeconds,  Message)
-            values(:startingWhenEpochSeconds, :durationSeconds, :message);"""
+insert into Errors(StartingWhenEpochSeconds,  DurationSeconds,  MessageId)
+values(
+  :startingWhenEpochSeconds,
+  :durationSeconds,
+  (select Id from ErrorMessages where Message = :message));"""
+
+    INSERT_AN_ERROR_MESSAGE = """
+insert or ignore into ErrorMessages(Message)
+                             values(:message);"""
 
     INSERT_A_RESPONSE = """
-insert into Responses(StartingWhenEpochSeconds,  DurationSeconds,  Response)
-               values(:startingWhenEpochSeconds, :durationSeconds, :response);"""
+insert into Responses(StartingWhenEpochSeconds,  DurationSeconds,  ResponseSizeBytes)
+               values(:startingWhenEpochSeconds, :durationSeconds, :responseSizeBytes);"""
 
     CREATE_TABLES = """
+create table if not exists ErrorMessages(
+    Id integer primary key not null,
+    Message text not null,
+    unique (Message)
+);
+
 create table if not exists Errors(
     StartingWhenEpochSeconds real not null,
     DurationSeconds          real not null,
-    Message                  text not null);
+    MessageId                integer not null,
+    foreign key (MessageId) references ErrorMessages(Id));
 
 create table if not exists Responses(
     StartingWhenEpochSeconds real not null,
     DurationSeconds          real not null,
-    Response                 text not null);
+    ResponseSizeBytes        integer not null);
 """
 
 
@@ -54,6 +68,7 @@ def recv_until(sock, terminator, bufsize=1024*8):
 def http_head(address, port):
     log('Creating socket.')
     with net.socket() as sock:
+        sock.settimeout(2) # seconds
         log(f'Connecting to {address}:{port}.')
         sock.connect((address, port))
         log('Sending payload.')
@@ -71,11 +86,15 @@ def http_nag(address, port, db):
         after = time.time()
     except Exception:
         after = time.time()
-        log(f'Error sending request.')
+        message = traceback.format_exc()
+        log(message)
+        db.execute(Sql.INSERT_AN_ERROR_MESSAGE, {
+            'message': message
+        })
         db.execute(Sql.INSERT_AN_ERROR, {
             'startingWhenEpochSeconds': before,
             'durationSeconds': after - before,
-            'message': traceback.format_exc()
+            'message': message
         })
         db.commit()
         return
@@ -85,7 +104,7 @@ def http_nag(address, port, db):
     db.execute(Sql.INSERT_A_RESPONSE, {
         'startingWhenEpochSeconds': before,
         'durationSeconds': after - before,
-        'response': response
+        'responseSizeBytes': len(response)
     })
     db.commit()
 
