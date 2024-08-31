@@ -15,6 +15,7 @@ END_SQL
 >errors.plt cat <<'END_GNUPLOT'
 set timefmt '%s'
 set xdata time
+set format x "%b %d"
 set yrange [0:5]
 plot 'errors.txt' using 1:2
 END_GNUPLOT
